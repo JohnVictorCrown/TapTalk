@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -698,8 +699,8 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
     super.dispose();
   }
 
-  // ---------------------------------------------------------------------------
-  // PURE DART TRUE AMPLIFIER (NO FFMPEG NEEDED)
+// ---------------------------------------------------------------------------
+  // PURE DART TRUE AMPLIFIER (16/32-BIT AUTO-DETECT + SOFT CLIPPING)
   // ---------------------------------------------------------------------------
   Future<String?> _applyTrueAmplification(String originalPath, double multiplier) async {
     if (multiplier == 1.0) return originalPath; // No math needed
@@ -709,43 +710,70 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
       Uint8List bytes = await file.readAsBytes();
 
       // 1. Find the "data" chunk in the WAV file
-      int dataStartIndex = 44; // Default WAV header length
+      int dataStartIndex = 44; 
       for (int i = 0; i < bytes.length - 4; i++) {
-        if (bytes[i] == 100 && bytes[i + 1] == 97 && bytes[i + 2] == 116 && bytes[i + 3] == 97) { // "data" in ASCII
-          dataStartIndex = i + 8; // Skip "data" (4 bytes) + chunk size (4 bytes)
+        if (bytes[i] == 100 && bytes[i + 1] == 97 && bytes[i + 2] == 116 && bytes[i + 3] == 97) { // "data"
+          dataStartIndex = i + 8; 
           break;
         }
       }
 
-      // 2. Extract Header and PCM Data safely
+      // 2. Dynamically read Bit Depth from the WAV Header (Byte 34-35)
+      int bitsPerSample = bytes[34] | (bytes[35] << 8);
+
       Uint8List header = bytes.sublist(0, dataStartIndex);
-      // We copy dataBytes to a new list to ensure perfectly aligned memory for Int16List
+      // Copy to ensure perfectly aligned memory
       Uint8List dataBytes = Uint8List.fromList(bytes.sublist(dataStartIndex));
       
-      // 3. Convert bytes to 16-bit integers (raw audio waves)
-      Int16List pcmData = dataBytes.buffer.asInt16List();
-      Int16List amplifiedPcm = Int16List(pcmData.length);
-
-      // 4. Apply TRUE Amplification (Multiply & Clamp)
-      for (int i = 0; i < pcmData.length; i++) {
-        double sample = pcmData[i] * multiplier;
-
-        // Clamp to 16-bit audio limits to create the "blown out" clipping effect naturally
-        if (sample > 32767) {
-          amplifiedPcm[i] = 32767;
-        } else if (sample < -32768) {
-          amplifiedPcm[i] = -32768;
-        } else {
-          amplifiedPcm[i] = sample.toInt();
-        }
-      }
-
-      // 5. Stitch modified audio back together
       BytesBuilder builder = BytesBuilder();
       builder.add(header);
-      builder.add(amplifiedPcm.buffer.asUint8List());
 
-      // 6. Save as new temporary file
+      if (bitsPerSample == 32) {
+        // ---------------------------------------------------
+        // 32-BIT WAV PROCESSING
+        // ---------------------------------------------------
+        Int32List pcmData = dataBytes.buffer.asInt32List();
+        Int32List amplifiedPcm = Int32List(pcmData.length);
+        
+        // Max value for 32-bit signed integer
+        double maxInt32 = 2147483647.0;
+
+        for (int i = 0; i < pcmData.length; i++) {
+          // Normalize to a float between -1.0 and 1.0, then apply our massive gain multiplier
+          double normalized = (pcmData[i] / maxInt32) * multiplier;
+
+          // SOFT CLIPPER (Arctangent Limiter)
+          // This maps infinite volume multipliers smoothly into the -1.0 to 1.0 range. 
+          // Quiet sounds get pushed to max, loud sounds curve safely under the limit.
+          normalized = (2.0 / math.pi) * math.atan(normalized);
+
+          // Convert back to 32-bit integer
+          amplifiedPcm[i] = (normalized * maxInt32).toInt();
+        }
+        builder.add(amplifiedPcm.buffer.asUint8List());
+
+      } else {
+        // ---------------------------------------------------
+        // 16-BIT WAV PROCESSING
+        // ---------------------------------------------------
+        Int16List pcmData = dataBytes.buffer.asInt16List();
+        Int16List amplifiedPcm = Int16List(pcmData.length);
+        
+        // Max value for 16-bit signed integer
+        double maxInt16 = 32767.0;
+
+        for (int i = 0; i < pcmData.length; i++) {
+          double normalized = (pcmData[i] / maxInt16) * multiplier;
+
+          // SOFT CLIPPER (Arctangent Limiter)
+          normalized = (2.0 / math.pi) * math.atan(normalized);
+
+          amplifiedPcm[i] = (normalized * maxInt16).toInt();
+        }
+        builder.add(amplifiedPcm.buffer.asUint8List());
+      }
+
+      // 3. Save as new temporary file
       String outPath = originalPath.replaceAll('.wav', '_amplified.wav');
       await File(outPath).writeAsBytes(builder.toBytes());
       
@@ -754,9 +782,8 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
       print("Amplification Error: $e");
       return originalPath; // Fallback to original if something fails
     }
-  }
-  // ---------------------------------------------------------------------------
-
+ }
+ 
   Future<void> _toggleRecording() async {
     if (_isPlaying) {
       await _audioPlayer.stop();
@@ -929,7 +956,7 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
                         child: Slider(
                           value: _amplification,
                           min: 1.0,
-                          max: 10000.0,
+                          max: 60.0,
                           divisions: 99,
                           label: "${_amplification.toInt()}x",
                           onChanged: (val) {
