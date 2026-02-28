@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -649,6 +650,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
+
 // ---------------------------------------------------------------------------
 // MIC AMPLIFIER SCREEN (NEW)
 // ---------------------------------------------------------------------------
@@ -665,6 +667,7 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
   
   bool _isRecording = false;
   bool _isPlaying = false;
+  bool _isLooping = false; // <-- New Loop State
   double _amplification = 1.0;
   String? _recordedFilePath;
 
@@ -695,8 +698,66 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
     super.dispose();
   }
 
+  // ---------------------------------------------------------------------------
+  // PURE DART TRUE AMPLIFIER (NO FFMPEG NEEDED)
+  // ---------------------------------------------------------------------------
+  Future<String?> _applyTrueAmplification(String originalPath, double multiplier) async {
+    if (multiplier == 1.0) return originalPath; // No math needed
+
+    try {
+      File file = File(originalPath);
+      Uint8List bytes = await file.readAsBytes();
+
+      // 1. Find the "data" chunk in the WAV file
+      int dataStartIndex = 44; // Default WAV header length
+      for (int i = 0; i < bytes.length - 4; i++) {
+        if (bytes[i] == 100 && bytes[i + 1] == 97 && bytes[i + 2] == 116 && bytes[i + 3] == 97) { // "data" in ASCII
+          dataStartIndex = i + 8; // Skip "data" (4 bytes) + chunk size (4 bytes)
+          break;
+        }
+      }
+
+      // 2. Extract Header and PCM Data safely
+      Uint8List header = bytes.sublist(0, dataStartIndex);
+      // We copy dataBytes to a new list to ensure perfectly aligned memory for Int16List
+      Uint8List dataBytes = Uint8List.fromList(bytes.sublist(dataStartIndex));
+      
+      // 3. Convert bytes to 16-bit integers (raw audio waves)
+      Int16List pcmData = dataBytes.buffer.asInt16List();
+      Int16List amplifiedPcm = Int16List(pcmData.length);
+
+      // 4. Apply TRUE Amplification (Multiply & Clamp)
+      for (int i = 0; i < pcmData.length; i++) {
+        double sample = pcmData[i] * multiplier;
+
+        // Clamp to 16-bit audio limits to create the "blown out" clipping effect naturally
+        if (sample > 32767) {
+          amplifiedPcm[i] = 32767;
+        } else if (sample < -32768) {
+          amplifiedPcm[i] = -32768;
+        } else {
+          amplifiedPcm[i] = sample.toInt();
+        }
+      }
+
+      // 5. Stitch modified audio back together
+      BytesBuilder builder = BytesBuilder();
+      builder.add(header);
+      builder.add(amplifiedPcm.buffer.asUint8List());
+
+      // 6. Save as new temporary file
+      String outPath = originalPath.replaceAll('.wav', '_amplified.wav');
+      await File(outPath).writeAsBytes(builder.toBytes());
+      
+      return outPath;
+    } catch (e) {
+      print("Amplification Error: $e");
+      return originalPath; // Fallback to original if something fails
+    }
+  }
+  // ---------------------------------------------------------------------------
+
   Future<void> _toggleRecording() async {
-    // If we are playing audio, stop it before starting a new recording
     if (_isPlaying) {
       await _audioPlayer.stop();
     }
@@ -708,7 +769,7 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
         _isRecording = false;
         _recordedFilePath = path;
       });
-      // Automatically playback the recorded file
+      
       if (path != null) {
         _playAudio();
       }
@@ -716,11 +777,11 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
       // START RECORDING
       if (await _audioRecorder.hasPermission()) {
         final Directory tempDir = await getTemporaryDirectory();
-        final String path = '${tempDir.path}/amplified_recording.m4a';
+        final String path = '${tempDir.path}/raw_recording.wav'; // Must be WAV for True Amp
 
         // Configure recording to inherently filter noise & echo at the hardware level
         const config = RecordConfig(
-          encoder: AudioEncoder.aacLc,
+          encoder: AudioEncoder.wav, // Changed to WAV
           noiseSuppress: true,
           echoCancel: true,
           autoGain: true, 
@@ -742,13 +803,31 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
   Future<void> _playAudio() async {
     if (_recordedFilePath == null) return;
     
-    // Set digital volume/amplification scale based on slider 
-    await _audioPlayer.setVolume(_amplification);
-    await _audioPlayer.play(DeviceFileSource(_recordedFilePath!));
+    await _audioPlayer.stop();
+
+    // 1. Process the audio waves mathematically
+    String? finalPathToPlay = await _applyTrueAmplification(_recordedFilePath!, _amplification);
+
+    // 2. Set loop mode based on the user's toggle
+    await _audioPlayer.setReleaseMode(_isLooping ? ReleaseMode.loop : ReleaseMode.stop);
+
+    // 3. Play at max system volume (since the file itself is now amplified)
+    if (finalPathToPlay != null) {
+      await _audioPlayer.setVolume(1.0);
+      await _audioPlayer.play(DeviceFileSource(finalPathToPlay));
+    }
   }
 
   Future<void> _stopPlayback() async {
     await _audioPlayer.stop();
+  }
+
+  void _toggleLoop() {
+    setState(() {
+      _isLooping = !_isLooping;
+    });
+    // Apply immediately if audio is already playing
+    _audioPlayer.setReleaseMode(_isLooping ? ReleaseMode.loop : ReleaseMode.stop);
   }
 
   @override
@@ -760,6 +839,17 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
           title: const Text("Mic Amplifier"),
           backgroundColor: Colors.transparent,
           elevation: 0,
+          actions: [
+            // REPEAT / LOOP BUTTON
+            IconButton(
+              tooltip: "Loop Playback: ${_isLooping ? 'ON' : 'OFF'}",
+              icon: Icon(
+                Icons.repeat,
+                color: _isLooping ? const Color(0xFF00BFA6) : Colors.white38,
+              ),
+              onPressed: _toggleLoop,
+            ),
+          ],
         ),
         body: Center(
           child: Padding(
@@ -826,7 +916,7 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
                 
                 const SizedBox(height: 60),
 
-                // AMPLIFICATION SLIDER
+                // TRUE AMPLIFICATION SLIDER
                 Row(
                   children: [
                     const Icon(Icons.volume_down, color: Colors.white54),
@@ -844,18 +934,21 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
                           label: "${_amplification.toInt()}x",
                           onChanged: (val) {
                             setState(() => _amplification = val);
-                            if (_isPlaying) {
-                              _audioPlayer.setVolume(_amplification);
+                          },
+                          // Re-process and restart audio when you let go of the slider
+                          onChangeEnd: (val) {
+                            if (_recordedFilePath != null && !_isRecording) {
+                              _playAudio(); 
                             }
                           },
                         ),
                       ),
                     ),
-                    const Icon(Icons.volume_up, color: Colors.white),
+                    const Icon(Icons.flash_on, color: Colors.yellowAccent),
                   ],
                 ),
                 Text(
-                  "Amplification Factor: ${_amplification.toInt()}x",
+                  "True Amplification: ${_amplification.toInt()}x",
                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                 ),
 
