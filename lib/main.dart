@@ -839,7 +839,7 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
                         child: Slider(
                           value: _amplification,
                           min: 1.0,
-                          max: 100.0,
+                          max: 10000.0,
                           divisions: 99,
                           label: "${_amplification.toInt()}x",
                           onChanged: (val) {
