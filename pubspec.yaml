@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.2
+version: 1.0.3
 
 environment:
   sdk: ^3.10.4
@@ -36,6 +36,10 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_tts: ^4.2.3
   shared_preferences: ^2.5.4
+  record: ^6.2.0
+  audioplayers: ^6.5.1
+  path_provider: ^2.1.5
+  
 
 dev_dependencies:
   flutter_test:
@@ -55,7 +59,8 @@ dev_dependencies:
 flutter:
 
   # The following line ensures that the Material Icons font is
-  # included with your application, so that you can use the icons in
+  # included with your applicati
+  on, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
 
