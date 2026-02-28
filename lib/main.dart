@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 void main() {
   runApp(const TapTalkApp());
@@ -214,7 +218,8 @@ class _HomeScreenState extends State<HomeScreen> {
   void _addPhrase(String text) async {
     if (text.isNotEmpty) {
       setState(() => phrases.add(text));
-      await _savePhrases(); 
+      await _savePhrases();
+
       _textController.clear();
       if (mounted) Navigator.of(context).pop();
     }
@@ -275,6 +280,17 @@ class _HomeScreenState extends State<HomeScreen> {
           backgroundColor: Colors.transparent,
           elevation: 0,
           actions: [
+            // MIC AMPLIFIER BUTTON
+            IconButton(
+              tooltip: "Mic Amplifier",
+              icon: const Icon(Icons.mic, color: Colors.white70),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const MicAmplifierScreen()),
+                );
+              },
+            ),
             // LOOP TOGGLE BUTTON
             IconButton(
               tooltip: "Loop Mode: ${_isLoopMode ? 'ON' : 'OFF'}",
@@ -375,7 +391,7 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 // ---------------------------------------------------------------------------
-// SETTINGS SCREEN (Unchanged)
+// SETTINGS SCREEN
 // ---------------------------------------------------------------------------
 class SettingsScreen extends StatefulWidget {
   final FlutterTts tts;
@@ -390,9 +406,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   double _rate = 0.5;
   String _language = "en-US";
   List<String> _languages = [];
-  List<Map<String, dynamic>> _voices = []; 
+  List<Map<String, dynamic>> _voices = [];
+
   List<Map<String, dynamic>> _filteredVoices = []; 
-  Map<String, dynamic>? _selectedVoice;
+  Map<String, dynamic>? _selectedVoice; 
 
   @override
   void initState() {
@@ -527,7 +544,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-          
+                
                 _buildSectionTitle("Specific Voice"),
                 _buildContainer(
                   DropdownButtonHideUnderline(
@@ -553,19 +570,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-          
+                
                 _buildSectionTitle("Speed: ${_rate.toStringAsFixed(1)}"),
-                _buildSlider(_rate, 0.0, 1.0, (val) {
-                   setState(() => _rate = val);
-                   _saveSettings();
+                _buildSlider(_rate, 0.0, 1.0, (val) { 
+                  setState(() => _rate = val); 
+                  _saveSettings();
                 }),
                 
                 _buildSectionTitle("Pitch: ${_pitch.toStringAsFixed(1)}"),
-                _buildSlider(_pitch, 0.5, 2.0, (val) {
-                   setState(() => _pitch = val);
-                   _saveSettings();
+                _buildSlider(_pitch, 0.5, 2.0, (val) { 
+                  setState(() => _pitch = val); 
+                  _saveSettings();
                 }),
-          
+                
                 const SizedBox(height: 40),
                 SizedBox(
                   width: double.infinity,
@@ -627,6 +644,240 @@ class _SettingsScreenState extends State<SettingsScreen> {
         max: max,
         divisions: 15,
         onChanged: onChanged,
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// MIC AMPLIFIER SCREEN (NEW)
+// ---------------------------------------------------------------------------
+class MicAmplifierScreen extends StatefulWidget {
+  const MicAmplifierScreen({super.key});
+
+  @override
+  State<MicAmplifierScreen> createState() => _MicAmplifierScreenState();
+}
+
+class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTickerProviderStateMixin {
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  
+  bool _isRecording = false;
+  bool _isPlaying = false;
+  double _amplification = 1.0;
+  String? _recordedFilePath;
+
+  late AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    )..repeat(reverse: true);
+
+    _audioPlayer.onPlayerStateChanged.listen((PlayerState state) {
+      if (mounted) {
+        setState(() {
+          _isPlaying = state == PlayerState.playing;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _audioRecorder.dispose();
+    _audioPlayer.dispose();
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _toggleRecording() async {
+    // If we are playing audio, stop it before starting a new recording
+    if (_isPlaying) {
+      await _audioPlayer.stop();
+    }
+
+    if (_isRecording) {
+      // STOP RECORDING
+      final path = await _audioRecorder.stop();
+      setState(() {
+        _isRecording = false;
+        _recordedFilePath = path;
+      });
+      // Automatically playback the recorded file
+      if (path != null) {
+        _playAudio();
+      }
+    } else {
+      // START RECORDING
+      if (await _audioRecorder.hasPermission()) {
+        final Directory tempDir = await getTemporaryDirectory();
+        final String path = '${tempDir.path}/amplified_recording.m4a';
+
+        // Configure recording to inherently filter noise & echo at the hardware level
+        const config = RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          noiseSuppress: true,
+          echoCancel: true,
+          autoGain: true, 
+        );
+
+        await _audioRecorder.start(config, path: path);
+        setState(() {
+          _isRecording = true;
+          _recordedFilePath = null;
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Microphone permission denied.")),
+        );
+      }
+    }
+  }
+
+  Future<void> _playAudio() async {
+    if (_recordedFilePath == null) return;
+    
+    // Set digital volume/amplification scale based on slider 
+    await _audioPlayer.setVolume(_amplification);
+    await _audioPlayer.play(DeviceFileSource(_recordedFilePath!));
+  }
+
+  Future<void> _stopPlayback() async {
+    await _audioPlayer.stop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text("Mic Amplifier"),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text(
+                  "Noise Filter: ENABLED",
+                  style: TextStyle(
+                    color: Color(0xFF00BFA6),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    letterSpacing: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 60),
+
+                // BIG RED RECORDING BUTTON
+                GestureDetector(
+                  onTap: _toggleRecording,
+                  child: AnimatedBuilder(
+                    animation: _pulseController,
+                    builder: (context, child) {
+                      return Container(
+                        height: 150,
+                        width: 150,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _isRecording ? Colors.redAccent : const Color(0xFF252540),
+                          boxShadow: _isRecording
+                              ? [
+                                  BoxShadow(
+                                    color: Colors.redAccent.withOpacity(0.5 * _pulseController.value),
+                                    blurRadius: 30 * _pulseController.value,
+                                    spreadRadius: 15 * _pulseController.value,
+                                  )
+                                ]
+                              : [
+                                  const BoxShadow(
+                                    color: Colors.black26,
+                                    blurRadius: 10,
+                                    offset: Offset(0, 5),
+                                  )
+                                ],
+                        ),
+                        child: Icon(
+                          _isRecording ? Icons.stop : Icons.mic,
+                          color: Colors.white,
+                          size: 60,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                Text(
+                  _isRecording 
+                      ? "Recording... Tap to stop" 
+                      : (_isPlaying ? "Playing Amplified Audio..." : "Tap to Record"),
+                  style: const TextStyle(color: Colors.white70, fontSize: 18),
+                ),
+                
+                const SizedBox(height: 60),
+
+                // AMPLIFICATION SLIDER
+                Row(
+                  children: [
+                    const Icon(Icons.volume_down, color: Colors.white54),
+                    Expanded(
+                      child: SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          activeTrackColor: const Color(0xFF6C63FF),
+                          thumbColor: const Color(0xFF00BFA6),
+                        ),
+                        child: Slider(
+                          value: _amplification,
+                          min: 1.0,
+                          max: 100.0,
+                          divisions: 99,
+                          label: "${_amplification.toInt()}x",
+                          onChanged: (val) {
+                            setState(() => _amplification = val);
+                            if (_isPlaying) {
+                              _audioPlayer.setVolume(_amplification);
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                    const Icon(Icons.volume_up, color: Colors.white),
+                  ],
+                ),
+                Text(
+                  "Amplification Factor: ${_amplification.toInt()}x",
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+
+                const SizedBox(height: 40),
+                
+                // REPLAY BUTTON
+                if (_recordedFilePath != null && !_isRecording)
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isPlaying ? Colors.redAccent : const Color(0xFF00BFA6),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: _isPlaying ? _stopPlayback : _playAudio,
+                    icon: Icon(_isPlaying ? Icons.stop : Icons.play_arrow),
+                    label: Text(_isPlaying ? "STOP" : "REPLAY", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
