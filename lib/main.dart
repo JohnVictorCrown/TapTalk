@@ -774,7 +774,7 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
       }
 
       // 3. Save as new temporary file
-      String outPath = originalPath.replaceAll('.wav', '_amplified.wav');
+      String outPath = originalPath;
       await File(outPath).writeAsBytes(builder.toBytes());
       
       return outPath;
