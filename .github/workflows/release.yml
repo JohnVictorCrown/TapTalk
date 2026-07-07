@@ -178,7 +178,7 @@ jobs:
       - name: System deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libgtk-3-dev liblzma-dev libstdc++-12-dev
+          sudo apt-get install -y -qq libgtk-3-dev liblzma-dev libstdc++-12-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
       - name: Pub get
         run: flutter pub get
