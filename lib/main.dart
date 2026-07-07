@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -26,7 +27,7 @@ class TapTalkApp extends StatelessWidget {
         brightness: Brightness.dark,
         scaffoldBackgroundColor: Colors.transparent,
         useMaterial3: true,
-        fontFamily: 'Roboto',
+        fontFamily: 'NeueFrutigerWorld',
         colorScheme: const ColorScheme.dark(
           primary: Color(0xFF6C63FF),
           secondary: Color(0xFF00BFA6),
@@ -146,7 +147,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
       );
     } catch (e) {
-      print("Error loading settings: $e");
+      debugPrint("Error loading settings: $e");
     }
   }
 
@@ -336,7 +337,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   borderRadius: BorderRadius.circular(24),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.3),
+                      color: Colors.black.withValues(alpha: 0.3),
                       blurRadius: 8,
                       offset: const Offset(2, 4),
                     ),
@@ -357,7 +358,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           maxLines: 4, 
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            fontSize: 18,
+                            fontSize: 14,
                             fontWeight: FontWeight.bold,
                             color: Colors.white,
                             shadows: [
@@ -779,7 +780,7 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
       
       return outPath;
     } catch (e) {
-      print("Amplification Error: $e");
+      debugPrint("Amplification Error: $e");
       return originalPath; // Fallback to original if something fails
     }
  }
@@ -802,7 +803,8 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
       }
     } else {
       // START RECORDING
-      if (await _audioRecorder.hasPermission()) {
+      final hasPermission = await _audioRecorder.hasPermission();
+      if (hasPermission) {
         final Directory tempDir = await getTemporaryDirectory();
         final String path = '${tempDir.path}/raw_recording.wav'; // Must be WAV for True Amp
 
@@ -819,7 +821,7 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
           _isRecording = true;
           _recordedFilePath = null;
         });
-      } else {
+      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Microphone permission denied.")),
         );
@@ -910,7 +912,7 @@ class _MicAmplifierScreenState extends State<MicAmplifierScreen> with SingleTick
                           boxShadow: _isRecording
                               ? [
                                   BoxShadow(
-                                    color: Colors.redAccent.withOpacity(0.5 * _pulseController.value),
+                                    color: Colors.redAccent.withValues(alpha: 0.5 * _pulseController.value),
                                     blurRadius: 30 * _pulseController.value,
                                     spreadRadius: 15 * _pulseController.value,
                                   )
