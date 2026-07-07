@@ -17,7 +17,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -61,7 +61,7 @@ jobs:
           cp build/app/outputs/flutter-apk/app-x86_64-release.apk     "staging/TapTalk-${{ env.VERSION }}-android-x86_64.apk"
           cp build/app/outputs/bundle/release/app-release.aab         "staging/TapTalk-${{ env.VERSION }}-android.aab"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android
           path: staging/
@@ -76,7 +76,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -107,7 +107,7 @@ jobs:
           cd build/ios/iphoneos
           zip -ry "$ROOT/staging/TapTalk-${{ env.VERSION }}-ios.zip" *.app/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ios
           path: staging/
@@ -122,7 +122,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -150,7 +150,7 @@ jobs:
           cd "build/windows/x64/runner/Release"
           7z a -tzip "$ROOT/staging/TapTalk-${{ env.VERSION }}-windows.zip" .
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: staging/
@@ -165,7 +165,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -197,7 +197,7 @@ jobs:
           cd "build/linux/$ARCH/release/bundle"
           tar czf "$ROOT/staging/TapTalk-${{ env.VERSION }}-linux-$(uname -m).tar.gz" .
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: staging/
@@ -212,7 +212,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -238,7 +238,7 @@ jobs:
           cd build/macos/Build/Products/Release
           zip -ry "$ROOT/staging/TapTalk-${{ env.VERSION }}-macos.zip" *.app/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos
           path: staging/
@@ -255,7 +255,7 @@ jobs:
 
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
 
       - name: Version
         id: version
@@ -268,7 +268,7 @@ jobs:
           ls -la release/
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: TapTalk ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
